@@ -1,0 +1,69 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "slots": [],
+          "name": "HelloWorldIntent",
+          "samples": [
+            "hello",
+            "how are you",
+            "say hi world",
+            "say hi",
+            "hi",
+            "say hello world",
+            "say hello"
+          ]
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "slots": [],
+          "name": "ClockInIntent",
+          "samples": [
+            "punch me in for work",
+            "clock me in for work",
+            "clock me in to work",
+            "punch me in",
+            "punch in",
+            "clock me in",
+            "clock in"
+          ]
+        },
+        {
+          "slots": [],
+          "name": "ClockOutIntent",
+          "samples": [
+            "clock me out for work",
+            "punch me out of work",
+            "clock me out of work",
+            "punch me out",
+            "punch out",
+            "clock me out",
+            "clock out"
+          ]
+        }
+      ],
+      "types": [],
+      "invocationName": "timesheet assistant"
+    }
+  }
+}
