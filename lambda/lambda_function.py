@@ -20,6 +20,19 @@ logger.setLevel(logging.INFO)
 # library for time calculations
 from datetime import datetime
 
+# libraries for dynamodb and persistence
+import json
+from ask_sdk_model.interfaces.alexa.presentation.apl import (
+    RenderDocumentDirective)
+
+import os
+import boto3
+
+from ask_sdk.standard import StandardSkillBuilder
+from ask_sdk_dynamodb.adapter import DynamoDbAdapter
+from ask_sdk_core.dispatch_components import AbstractRequestInterceptor
+from ask_sdk_core.dispatch_components import AbstractResponseInterceptor
+
 # launch request handler, for when skill awakens from launch request
 class LaunchRequestHandler(AbstractRequestHandler):
     """Handler for Skill Launch."""
@@ -30,8 +43,22 @@ class LaunchRequestHandler(AbstractRequestHandler):
 
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
-        speak_output = "Your timesheet is open, let's get started! Clock in and out at any time."
-
+        
+        session_attributes = handler_input.attributes_manager.session_attributes
+        
+        if session_attributes["isClockedIn"] is None:
+            speak_output = "Welcome to Timesheet Assistant, your solution to voice-activated Timesheets. Clock in to get started."
+        elif session_attributes["isClockedIn"]:
+            clockInTime = datetime.strptime(session_attributes["clockInTime"], '%y-%m-%d %H:%M:%S.%f')
+            now = datetime.now()
+            days, hours, minutes, seconds = timeDifference(clockInTime, now)
+            speak_output = f"Welcome back to your Timesheet. You've been clocked in for {minutes} minutes and {seconds} seconds."
+        elif not session_attributes["isClockedIn"]:
+            speak_output = "Your Timesheet Assistant is open. Clock in to get started."
+        else:
+            speak_output = "There was a problem with the database."
+        
+        
         return (
             handler_input.response_builder
                 .speak(speak_output)
@@ -39,18 +66,6 @@ class LaunchRequestHandler(AbstractRequestHandler):
                 .response
         )
 
-
-## helepr functions for session persistence 
-def getSessionAttribute(handler_input, key, default=None):
-    sessionAttributes = handler_input.attributes_manager.session_attributes
-    if (value := sessionAttributes.get(key)) is not None:
-        return value
-    else:
-        return default
-
-def setSessionAttribute(handler_input, key, value):
-    sessionAttributes = handler_input.attributes_manager.session_attributes
-    sessionAttributes[key] = value
 
 ## Clocking in and Clocking out
 
@@ -61,14 +76,30 @@ class ClockInIntentHandler(AbstractRequestHandler):
 
     def handle(self, handler_input):
         
-        # get current time
-        clockInTime = datetime.now()
+        session_attributes = handler_input.attributes_manager.session_attributes
         
-        # set clock in time in session attributes
-        setSessionAttribute(handler_input, 'clockIn', clockInTime.strftime('%y-%m-%d %H:%M:%S.%f'))
+        # get session attribute for isClockedIn
+        isClockedIn = session_attributes["isClockedIn"]
         
-        
-        speak_output = "All set. Remember to clock out!"
+        # if clocked in is false, allow clock in and return
+        if not isClockedIn:
+            # get current time
+            clockInTime = datetime.now()
+            
+            # set clock in time in session attributes
+            session_attributes["clockInTime"] = clockInTime.strftime('%y-%m-%d %H:%M:%S.%f')
+            session_attributes["isClockedIn"] = True
+            
+            speak_output = "All set. Remember to clock out!"
+            
+            # else still clocked in
+        elif isClockedIn:
+            
+            speak_output = "You are already clocked in."
+            
+            #else error
+        else:
+            speak_output = "Your status is undefined."
         
         return (
             handler_input.response_builder
@@ -77,6 +108,23 @@ class ClockInIntentHandler(AbstractRequestHandler):
                 .response
         )
 
+def timeDifference(timeIn, timeOut):
+    timeDelta = timeOut - timeIn
+    totalSeconds = int(timeDelta.total_seconds())
+    
+    days = totalSeconds // 86400
+    totalSeconds = totalSeconds % 86400
+    
+    hours = totalSeconds // 3600
+    totalSeconds = totalSeconds % 3600
+    
+    minutes = totalSeconds // 60 
+    totalSeconds = totalSeconds % 60
+    
+    seconds = totalSeconds
+    
+    return (days, hours, minutes, seconds)
+
 class ClockOutIntentHandler(AbstractRequestHandler):
     ## clock in intent handler
     def can_handle(self, handler_input):
@@ -84,29 +132,49 @@ class ClockOutIntentHandler(AbstractRequestHandler):
 
     def handle(self, handler_input):
         
-        # get current time
-        clockOutTime = datetime.now()
+        session_attributes = handler_input.attributes_manager.session_attributes
         
-        # retrieve clock in time
-        clockInTime = datetime.strptime(getSessionAttribute(handler_input, 'clockIn'), '%y-%m-%d %H:%M:%S.%f')
+        # get session attribute for isClockedIn
+        isClockedIn = session_attributes["isClockedIn"]
         
-        # timedelta object stores only days, seconds, and microseconds
-        timeDelta = clockOutTime - clockInTime
-        totalSeconds = int(timeDelta.total_seconds())
-        
-        days = totalSeconds // 86400
-        totalSeconds = totalSeconds % 86400
-        
-        hours = totalSeconds // 3600
-        totalSeconds = totalSeconds % 3600
-        
-        minutes = totalSeconds // 60 
-        totalSeconds = totalSeconds % 60
-        
-        seconds = totalSeconds
-        
-        
-        speak_output = f"You worked for {hours} hours, {minutes} minutes, and {seconds} seconds."
+        # if currently clocked in, allow clock out procedure
+        if isClockedIn:
+            
+            # get current time
+            clockOutTime = datetime.now()
+            
+            # retrieve clock in time
+            clockInTime = datetime.strptime(session_attributes["clockInTime"], '%y-%m-%d %H:%M:%S.%f')
+            session_attributes["isClockedIn"] = False
+            
+            # timedelta object stores only days, seconds, and microseconds
+            days, hours, minutes, seconds = timeDifference(clockInTime, clockOutTime)
+            
+            speak_output = f"You worked for {hours} hours, {minutes} minutes, and {seconds} seconds."
+            
+            # else if not clocked in
+        elif not isClockedIn:
+            
+            speak_output = "You are not currently clocked in."
+            
+            return (
+            handler_input.response_builder
+                .speak(speak_output)
+                .set_should_end_session(False)
+                .response
+            )
+            
+            # else errors
+        else:
+            
+            speak_output = "Your clocked in status is undefined."
+            
+            return (
+            handler_input.response_builder
+                .speak(speak_output)
+                .set_should_end_session(False)
+                .response
+            )
         
         return (
             handler_input.response_builder
@@ -241,12 +309,66 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
                 .response
         )
 
+class LoadDataInterceptor(AbstractRequestInterceptor):
+    """Check if user is invoking skill for first time and initialize preset."""
+    def process(self, handler_input):
+        # type: (HandlerInput) -> None
+        persistent_attributes = handler_input.attributes_manager.persistent_attributes
+        session_attributes = handler_input.attributes_manager.session_attributes
+        
+        # ensure important variables are initialized so they're used more easily in handlers.
+        # This makes sure they're ready to go and makes the handler code a little more readable
+        if 'isClockedIn' not in session_attributes:
+            session_attributes["isClockedIn"] = False
+            
+        if 'isClockedIn' not in session_attributes:
+            persistent_attributes["isClockedIn"] = False
+            
+        if 'clockInTime' not in session_attributes:
+            session_attributes["clockInTime"] = None
+            
+        if 'clockInTime' not in persistent_attributes:
+            persistent_attributes["clockInTime"] = None
+            
+        # if you're tracking past_celebs between sessions, use the persistent value
+        # set the visits value (either 0 for new, or the persistent value)
+        session_attributes["isClockedIn"] = persistent_attributes["isClockedIn"] if 'isClockedIn' in persistent_attributes else False
+        session_attributes["clockInTime"] = persistent_attributes["clockInTime"] if 'clockInTime' in persistent_attributes and session_attributes["isClockedIn"] else None
+
+class LoggingRequestInterceptor(AbstractRequestInterceptor):
+    """Log the alexa requests."""
+    def process(self, handler_input):
+        # type: (HandlerInput) -> None
+        logger.debug('----- REQUEST -----')
+        logger.debug("{}".format(
+            handler_input.request_envelope.request))
+
+class SaveDataInterceptor(AbstractResponseInterceptor):
+    """Save persistence attributes before sending response to user."""
+    def process(self, handler_input, response):
+        # type: (HandlerInput, Response) -> None
+        persistent_attributes = handler_input.attributes_manager.persistent_attributes
+        session_attributes = handler_input.attributes_manager.session_attributes
+        
+        persistent_attributes["isClockedIn"] = session_attributes["isClockedIn"]
+        persistent_attributes["clockInTime"] = session_attributes["clockInTime"] if session_attributes["isClockedIn"] else None
+        
+        handler_input.attributes_manager.save_persistent_attributes()
+
+class LoggingResponseInterceptor(AbstractResponseInterceptor):
+    """Log the alexa responses."""
+    def process(self, handler_input, response):
+        # type: (HandlerInput, Response) -> None
+        logger.debug('----- RESPONSE -----')
+        logger.debug("{}".format(response))
+
 # The SkillBuilder object acts as the entry point for your skill, routing all request and response
 # payloads to the handlers above. Make sure any new handlers or interceptors you've
 # defined are included below. The order matters - they're processed top to bottom.
 
 
-sb = SkillBuilder()
+sb = StandardSkillBuilder(
+    table_name=os.environ.get("DYNAMODB_PERSISTENCE_TABLE_NAME"), auto_create_table=False)
 
 sb.add_request_handler(LaunchRequestHandler())
 
@@ -261,5 +383,12 @@ sb.add_request_handler(SessionEndedRequestHandler())
 sb.add_request_handler(IntentReflectorHandler()) # make sure IntentReflectorHandler is last so it doesn't override your custom intent handlers
 
 sb.add_exception_handler(CatchAllExceptionHandler())
+
+# Interceptors
+sb.add_global_request_interceptor(LoadDataInterceptor())
+sb.add_global_request_interceptor(LoggingRequestInterceptor())
+
+sb.add_global_response_interceptor(SaveDataInterceptor())
+sb.add_global_response_interceptor(LoggingResponseInterceptor())
 
 lambda_handler = sb.lambda_handler()
